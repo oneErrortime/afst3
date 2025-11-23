@@ -3,7 +3,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 import os
-from .api import auth, books, readers, borrows
+from .api import auth, books, readers, borrows, advanced
 
 app = FastAPI(title="Library Management API", version="1.0.0")
 
@@ -21,6 +21,7 @@ app.include_router(auth.router, prefix="/auth", tags=["authentication"])
 app.include_router(books.router, prefix="/books", tags=["books"])
 app.include_router(readers.router, prefix="/readers", tags=["readers"])
 app.include_router(borrows.router, prefix="/borrows", tags=["borrows"])
+app.include_router(advanced.router, prefix="/advanced", tags=["advanced"])
 
 # Mount the templates directory to serve static files
 app.mount("/static", StaticFiles(directory="templates"), name="static")
