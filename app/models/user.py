@@ -10,5 +10,6 @@ class User(Base):
     hashed_password = Column(String(128), nullable=False)
     is_active = Column(Boolean, default=True)
 
-    # Relationship to track who created/managed records if needed
-    # For now, we'll just have the basic user fields
+    # Связи для ролевой системы
+    roles = relationship("app.models.role.Role", secondary="user_roles", back_populates="users")
+    activities = relationship("app.models.role.UserActivity", back_populates="user")

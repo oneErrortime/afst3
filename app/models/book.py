@@ -16,3 +16,7 @@ class Book(Base):
     
     # Relationship with borrows
     borrows = relationship("Borrow", back_populates="book")
+    
+    # Relationships for reservation system
+    reservations = relationship("Reservation", back_populates="book")
+    waiting_lists = relationship("WaitingList", back_populates="book")
