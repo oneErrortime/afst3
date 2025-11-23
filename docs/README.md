@@ -30,6 +30,27 @@ The frontend communicates with the backend using these endpoints:
 - `/borrows/return` - Return a book
 - `/borrows/reader/{reader_id}/borrowed` - Get borrowed books for a reader
 
+## Advanced Features
+
+The backend API provides additional functionality that is not currently implemented in the frontend. These features include:
+
+- **Reservations**: Book reservation system with queue management
+- **Reviews & Ratings**: User reviews and book ratings
+- **Fines & Payments**: Fine management and payment processing
+- **Statistics & Analytics**: Dashboard statistics, book statistics, and popularity analytics
+- **Notifications**: User notification system
+
+For complete documentation of these advanced features, see [advanced_features.md](advanced_features.md).
+
+## API Documentation
+
+Complete documentation for the system:
+
+- [Documentation Home](documentation.html) - Centralized page with all documentation
+- [API Endpoints Reference](api_endpoints.md) - Comprehensive list of all available API endpoints
+- [Architecture Documentation](architecture.md) - Detailed architecture overview
+- [Advanced Features](advanced_features.md) - Documentation of extended functionality
+
 ## Configuration
 
 The API URL can be configured and saved in the browser's localStorage. This allows the frontend to remember your backend URL between sessions.
