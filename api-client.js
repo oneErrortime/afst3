@@ -433,6 +433,165 @@ class ApiClient {
         const data = await this.get('/borrows/');
         return data.map(borrow => new DTO.BorrowDTO(borrow));
     }
+
+    // ========== ADVANCED API (RESERVATIONS) ==========
+
+    /** 
+     * Создать бронирование книги
+     * @param {number} bookId
+     * @param {number} readerId
+     * @param {number} priority
+     * @returns {Promise<Object>}
+     */
+    async createReservation(bookId, readerId, priority = 0) {
+        const data = await this.post('/advanced/reservations/', {
+            book_id: bookId,
+            reader_id: readerId,
+            priority: priority
+        });
+        return data;
+    }
+
+    /** 
+     * Получить бронирования читателя
+     * @param {number} readerId
+     * @param {string} status
+     * @returns {Promise<Object[]>}
+     */
+    async getReaderReservations(readerId, status = null) {
+        let endpoint = `/advanced/reservations/reader/${readerId}`;
+        if (status) {
+            endpoint += `?status=${status}`;
+        }
+        return await this.get(endpoint);
+    }
+
+    /** 
+     * Отменить бронирование
+     * @param {number} reservationId
+     * @returns {Promise<Object>}
+     */
+    async cancelReservation(reservationId) {
+        return await this.put(`/advanced/reservations/${reservationId}/cancel`);
+    }
+
+    // ========== ADVANCED API (REVIEWS & RATINGS) ==========
+
+    /** 
+     * Создать отзыв на книгу
+     * @param {number} bookId
+     * @param {number} readerId
+     * @param {number} rating
+     * @param {string} title
+     * @param {string} reviewText
+     * @returns {Promise<Object>}
+     */
+    async createReview(bookId, readerId, rating, title = null, reviewText = null) {
+        const data = {
+            book_id: bookId,
+            reader_id: readerId,
+            rating: rating
+        };
+        if (title) data.title = title;
+        if (reviewText) data.review_text = reviewText;
+        
+        return await this.post(`/advanced/books/${bookId}/reviews`, data);
+    }
+
+    /** 
+     * Получить отзывы на книгу
+     * @param {number} bookId
+     * @param {number} skip
+     * @param {number} limit
+     * @returns {Promise<Object[]>}
+     */
+    async getBookReviews(bookId, skip = 0, limit = 20) {
+        const endpoint = `/advanced/books/${bookId}/reviews?skip=${skip}&limit=${limit}`;
+        return await this.get(endpoint);
+    }
+
+    // ========== ADVANCED API (FINES & PAYMENTS) ==========
+
+    /** 
+     * Получить штрафы читателя
+     * @param {number} readerId
+     * @param {string} status
+     * @returns {Promise<Object[]>}
+     */
+    async getReaderFines(readerId, status = null) {
+        let endpoint = `/advanced/readers/${readerId}/fines`;
+        if (status) {
+            endpoint += `?status=${status}`;
+        }
+        return await this.get(endpoint);
+    }
+
+    /** 
+     * Оплатить штраф
+     * @param {number} fineId
+     * @param {number} amount
+     * @param {string} method
+     * @returns {Promise<Object>}
+     */
+    async payFine(fineId, amount, method) {
+        const data = {
+            amount: amount,
+            method: method
+        };
+        
+        return await this.post(`/advanced/fines/${fineId}/pay`, data);
+    }
+
+    // ========== ADVANCED API (STATISTICS & ANALYTICS) ==========
+
+    /** 
+     * Получить общую статистику для дашборда
+     * @returns {Promise<Object>}
+     */
+    async getDashboardStatistics() {
+        return await this.get('/advanced/statistics/dashboard');
+    }
+
+    /** 
+     * Получить подробную статистику по книге
+     * @param {number} bookId
+     * @returns {Promise<Object>}
+     */
+    async getBookStatistics(bookId) {
+        return await this.get(`/advanced/books/${bookId}/statistics`);
+    }
+
+    /** 
+     * Получить самые популярные книги
+     * @param {number} limit
+     * @returns {Promise<Object[]>}
+     */
+    async getPopularBooks(limit = 10) {
+        return await this.get(`/advanced/analytics/popular-books?limit=${limit}`);
+    }
+
+    // ========== ADVANCED API (NOTIFICATIONS) ==========
+
+    /** 
+     * Получить уведомления текущего пользователя
+     * @param {boolean} unreadOnly
+     * @param {number} skip
+     * @param {number} limit
+     * @returns {Promise<Object[]>}
+     */
+    async getMyNotifications(unreadOnly = false, skip = 0, limit = 20) {
+        const endpoint = `/advanced/notifications/my?unread_only=${unreadOnly}&skip=${skip}&limit=${limit}`;
+        return await this.get(endpoint);
+    }
+
+    /** 
+     * Отметить уведомление как прочитанное
+     * @param {number} notificationId
+     * @returns {Promise<Object>}
+     */
+    async markNotificationRead(notificationId) {
+        return await this.put(`/advanced/notifications/${notificationId}/read`);
+    }
 }
 
 /**
