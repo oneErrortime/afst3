@@ -7,18 +7,11 @@ __pycache__/
 .venv/
 venv/
 node_modules/
-*.egg-info/
-dist/
-build/
-*.so
-*.dylib
-*.dll
 
 # Logs and temp files
 *.log
 *.tmp
 *.swp
-*.swo
 
 # Environment
 .env
@@ -28,39 +21,4 @@ build/
 # Editors
 .vscode/
 .idea/
-*.swp
-*.swo
-
-# System files
-.DS_Store
-Thumbs.db
-
-# Testing
-.coverage
-htmlcov/
-.coverage.*
-.pytest_cache/
-.mypy_cache/
-
-# Distribution archives
-*.tar
-*.tar.gz
-*.tar.bz2
-*.tar.xz
-*.zip
-*.gz
-*.bz2
-*.xz
-*.7z
-*.rar
-*.zst
-*.lz4
-*.lzh
-*.cab
-*.arj
-*.rpm
-*.deb
-*.Z
-*.lz
-*.lzo
 ```

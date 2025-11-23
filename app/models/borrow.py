@@ -16,3 +16,4 @@ class Borrow(Base):
     # Relationships
     book = relationship("Book", back_populates="borrows")
     reader = relationship("Reader", back_populates="borrows")
+    fines = relationship("Fine", back_populates="borrow")
