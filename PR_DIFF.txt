@@ -1,0 +1,442 @@
+diff --git a/app/models/__init__.py b/app/models/__init__.py
+index 844cbb7..ad5e903 100644
+--- a/app/models/__init__.py
++++ b/app/models/__init__.py
+@@ -1,7 +1,10 @@
+-from .user import User
+-from .book import Book
++from .user import User, Role, Permission, RoleEnum, user_roles, role_permissions, UserActivity
++from .book import Book, Reservation, ReservationStatus, WaitingList, BookRequest
+ from .reader import Reader
+ from .borrow import Borrow
++from .notification import Notification, Event, NotificationPreference, NotificationType, NotificationChannel
+ from ..database import Base
+
+-__all__ = ["User", "Book", "Reader", "Borrow", "Base"]
+\ No newline at end of file
++__all__ = ["User", "Book", "Reader", "Borrow", "Base", "Role", "Permission", "RoleEnum", "user_roles",
++           "role_permissions", "UserActivity", "Reservation", "ReservationStatus", "WaitingList",
++           "BookRequest", "Notification", "Event", "NotificationPreference", "NotificationType", "NotificationChannel"]
+\ No newline at end of file
+diff --git a/app/models/book.py b/app/models/book.py
+index 877191c..23457f8 100644
+--- a/app/models/book.py
++++ b/app/models/book.py
+@@ -1,7 +1,104 @@
+-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
++from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean, Enum as SQLEnum
+ from sqlalchemy.orm import relationship
+ from ..database import Base
+-from datetime import datetime
++from datetime import datetime, timedelta
++import enum
+
+
++class ReservationStatus(str, enum.Enum):
++    """Статусы бронирования"""
++    PENDING = "pending"  # Ожидает подтверждения
++    CONFIRMED = "confirmed"  # Подтверждено
++    READY = "ready"  # Готово к выдаче
++    FULFILLED = "fulfilled"  # Выполнено
++    CANCELLED = "cancelled"  # Отмено
++    EXPIRED = "expired"  # Истекло
+
+
++class Reservation(Base):
++    """Модель бронирования книг"""
++    __tablename__ = "reservations"
++
++    id = Column(Integer, primary_key=True, index=True)
++    book_id = Column(Integer, ForeignKey("books.id"), nullable=False)
++    reader_id = Column(Integer, ForeignKey("readers.id"), nullable=False)
++
++    # Временные метки
++    created_at = Column(DateTime, default=datetime.utcnow)
++    reserved_until = Column(DateTime)  # Срок действия бронирования
++    pickup_deadline = Column(DateTime)  # Крайний срок получения
++    fulfilled_at = Column(DateTime)  # Когда выполнено
++
++    # Статус
++    status = Column(SQLEnum(ReservationStatus), default=ReservationStatus.PENDING)
++
++    # Приоритет (для очереди)
++    priority = Column(Integer, default=0)  # Чем выше, тем важнее
++    queue_position = Column(Integer)  # Позиция в очереди
++
++    # Уведомления
++    notification_sent = Column(Boolean, default=False)
++    email_sent = Column(Boolean, default=False)
++
++    # Связи
++    book = relationship("Book", back_populates="reservations")
++    reader = relationship("Reader", back_populates="reservations")
++
++    def is_expired(self):
++        """Проверка, истекло ли бронирование"""
++        from datetime import datetime
++        if self.reserved_until and datetime.utcnow() > self.reserved_until:
++            return True
++        return False
++
++    def calculate_queue_position(self, db):
++        """Вычисление позиции в очереди"""
++        active_reservations = db.query(Reservation).filter(
++            Reservation.book_id == self.book_id,
++            Reservation.status.in_([ReservationStatus.PENDING, ReservationStatus.CONFIRMED]),
++            Reservation.created_at < self.created_at
++        ).order_by(Reservation.priority.desc(), Reservation.created_at).all()
++
++        return len(active_reservations) + 1
+
+
++class WaitingList(Base):
++    """Лист ожидания для недоступных книг"""
++    __tablename__ = "waiting_lists"
++
++    id = Column(Integer, primary_key=True, index=True)
++    book_id = Column(Integer, ForeignKey("books.id"), nullable=False)
++    reader_id = Column(Integer, ForeignKey("readers.id"), nullable=False)
++
++    joined_at = Column(DateTime, default=datetime.utcnow)
++    position = Column(Integer)
++    notified = Column(Boolean, default=False)
++    active = Column(Boolean, default=True)
++
++    # Связи
++    book = relationship("Book", back_populates="waiting_list")
++    reader = relationship("Reader", back_populates="waiting_list")
+
+
++class BookRequest(Base):
++    """Запросы на приобретение книг"""
++    __tablename__ = "book_requests"
++
++    id = Column(Integer, primary_key=True, index=True)
++    reader_id = Column(Integer, ForeignKey("readers.id"), nullable=False)
++
++    title = Column(String, nullable=False)
++    author = Column(String, nullable=False)
++    isbn = Column(String)
++    reason = Column(String)  # Причина запроса
++
++    created_at = Column(DateTime, default=datetime.utcnow)
++    status = Column(String, default="pending")  # pending, approved, rejected, fulfilled
++    votes = Column(Integer, default=1)  # Поддержка от других читателей
++
++    # Связи
++    reader = relationship("Reader", back_populates="book_requests")
+
+
+ class Book(Base):
+     __tablename__ = "books"
+@@ -15,4 +112,8 @@ class Book(Base):
+     description = Column(String)  # Added for the second migration
+
+     # Relationship with borrows
+-    borrows = relationship("Borrow", back_populates="book")
+\ No newline at end of file
++    borrows = relationship("Borrow", back_populates="book")
++
++    # Новые связи для бронирования
++    reservations = relationship("Reservation", back_populates="book")
++    waiting_list = relationship("WaitingList", back_populates="book")
+\ No newline at end of file
+diff --git a/app/models/borrow.py b/app/models/borrow.py
+index c5f8d54..65056df 100644
+--- a/app/models/borrow.py
++++ b/app/models/borrow.py
+@@ -3,16 +3,22 @@ from sqlalchemy.orm import relationship
+ from ..database import Base
+ from datetime import datetime
+
+
+ class Borrow(Base):
+     __tablename__ = "borrows"
+
+     id = Column(Integer, primary_key=True, index=True)
+     book_id = Column(Integer, ForeignKey("books.id"), nullable=False)
+     reader_id = Column(Integer, ForeignKey("readers.id"), nullable=False)
++    user_id = Column(Integer, ForeignKey("users.id"))  # Кто оформил выдачу
+     borrow_date = Column(DateTime, default=datetime.utcnow)
+     return_date = Column(DateTime)  # NULL if not returned yet
++    due_date = Column(DateTime)  # Срок возврата
+     is_returned = Column(Boolean, default=False)  # To track return status
++    fine_amount = Column(Integer, default=0)  # Штраф в копейках
+
+     # Relationships
+     book = relationship("Book", back_populates="borrows")
+-    reader = relationship("Reader", back_populates="borrows")
+\ No newline at end of file
++    reader = relationship("Reader", back_populates="borrows")
++    user = relationship("User", back_populates="borrows")
++    notifications = relationship("Notification", back_populates="related_borrow")
+\ No newline at end of file
+diff --git a/app/models/notification.py b/app/models/notification.py
+new file mode 100644
+index 0000000..c0bda87
+--- /dev/null
++++ b/app/models/notification.py
+@@ -0,0 +1,122 @@
++from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean, Text, Enum as SQLEnum
++from sqlalchemy.orm import relationship
++from ..database import Base
++from datetime import datetime
++import enum
+
+
++class NotificationType(str, enum.Enum):
++    """Типы уведомлений"""
++    BOOK_AVAILABLE = "book_available"
++    BOOK_DUE = "book_due"
++    BOOK_OVERDUE = "book_overdue"
++    RESERVATION_READY = "reservation_ready"
++    RESERVATION_EXPIRED = "reservation_expired"
++    NEW_BOOK_ADDED = "new_book_added"
++    ACCOUNT_UPDATE = "account_update"
++    FINE_APPLIED = "fine_applied"
++    SYSTEM_MESSAGE = "system_message"
+
+
++class NotificationChannel(str, enum.Enum):
++    """Каналы уведомлений"""
++    EMAIL = "email"
++    SMS = "sms"
++    IN_APP = "in_app"
++    PUSH = "push"
+
+
++class Notification(Base):
++    """Модель уведомлений"""
++    __tablename__ = "notifications"
++
++    id = Column(Integer, primary_key=True, index=True)
++    user_id = Column(Integer, ForeignKey("users.id"))
++    reader_id = Column(Integer, ForeignKey("readers.id"))
++
++    type = Column(SQLEnum(NotificationType), nullable=False)
++    channel = Column(SQLEnum(NotificationChannel), default=NotificationChannel.IN_APP)
++
++    title = Column(String, nullable=False)
++    message = Column(Text, nullable=False)
++
++    # Метаданные
++    created_at = Column(DateTime, default=datetime.utcnow)
++    sent_at = Column(DateTime)
++    read_at = Column(DateTime)
++
++    is_read = Column(Boolean, default=False)
++    is_sent = Column(Boolean, default=False)
++
++    # Связанные сущности
++    related_book_id = Column(Integer, ForeignKey("books.id"))
++    related_borrow_id = Column(Integer, ForeignKey("borrows.id"))
++    related_reservation_id = Column(Integer, ForeignKey("reservations.id"))
++
++    # Приоритет
++    priority = Column(Integer, default=0)  # 0 - low, 1 - medium, 2 - high, 3 - urgent
++
++    # Связи
++    user = relationship("User", back_populates="notifications")
++    reader = relationship("Reader", back_populates="notifications")
++    related_book = relationship("Book")
++    related_borrow = relationship("Borrow")
++    related_reservation = relationship("Reservation")
+
+
++class Event(Base):
++    """Системные события для аудита"""
++    __tablename__ = "events"
++
++    id = Column(Integer, primary_key=True, index=True)
++    event_type = Column(String, nullable=False)  # book_borrowed, book_returned, etc.
++
++    # Кто совершил действие
++    user_id = Column(Integer, ForeignKey("users.id"))
++    reader_id = Column(Integer, ForeignKey("readers.id"))
++
++    # Что было сделано
++    action = Column(String, nullable=False)
++    entity_type = Column(String)  # book, reader, borrow
++    entity_id = Column(Integer)
++
++    # Детали
++    details = Column(Text)  # JSON с дополнительной информацией
++
++    # Технические данные
++    ip_address = Column(String)
++    user_agent = Column(String)
++
++    timestamp = Column(DateTime, default=datetime.utcnow)
++
++    # Связи
++    user = relationship("User")
++    reader = relationship("Reader")
+
+
++class NotificationPreference(Base):
++    """Настройки уведомлений для пользователей"""
++    __tablename__ = "notification_preferences"
++
++    id = Column(Integer, primary_key=True, index=True)
++    user_id = Column(Integer, ForeignKey("users.id"), unique=True)
++    reader_id = Column(Integer, ForeignKey("readers.id"), unique=True)
++
++    # Включены ли уведомления по типам
++    email_enabled = Column(Boolean, default=True)
++    sms_enabled = Column(Boolean, default=False)
++    in_app_enabled = Column(Boolean, default=True)
++    push_enabled = Column(Boolean, default=True)
++
++    # Конкретные типы уведомлений
++    book_due_reminder = Column(Boolean, default=True)
++    book_available = Column(Boolean, default=True)
++    reservation_updates = Column(Boolean, default=True)
++    new_books = Column(Boolean, default=False)
++    account_updates = Column(Boolean, default=True)
++
++    # Частота дайджестов
++    digest_frequency = Column(String, default="daily")  # immediate, daily, weekly
++
++    user = relationship("User", back_populates="notification_preferences")
++    reader = relationship("Reader", back_populates="notification_preferences")
+\ No newline at end of file
+diff --git a/app/models/reader.py b/app/models/reader.py
+index bdc77d0..b6dfe38 100644
+--- a/app/models/reader.py
++++ b/app/models/reader.py
+@@ -1,6 +1,8 @@
+-from sqlalchemy import Column, Integer, String
++from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
+ from sqlalchemy.orm import relationship
+ from ..database import Base
++from datetime import datetime
+
+
+ class Reader(Base):
+     __tablename__ = "readers"
+@@ -10,4 +12,13 @@ class Reader(Base):
+     email = Column(String, unique=True, index=True, nullable=False)
+
+     # Relationship with borrows
+-    borrows = relationship("Borrow", back_populates="reader")
+\ No newline at end of file
++    borrows = relationship("Borrow", back_populates="reader")
+
++    # Новые связи для расширенного функционала
++    user_id = Column(Integer, ForeignKey("users.id"))
++    user = relationship("User", back_populates="reader")
++    reservations = relationship("Reservation", back_populates="reader")
++    waiting_list = relationship("WaitingList", back_populates="reader")
++    book_requests = relationship("BookRequest", back_populates="reader")
++    notifications = relationship("Notification", back_populates="reader")
++    notification_preferences = relationship("NotificationPreference", back_populates="reader", uselist=False)
+\ No newline at end of file
+diff --git a/app/models/user.py b/app/models/user.py
+index 749a774..94765df 100644
+--- a/app/models/user.py
++++ b/app/models/user.py
+@@ -1,14 +1,98 @@
+-from sqlalchemy import Boolean, Column, Integer, String
++from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Table, Enum as SQLEnum
+ from sqlalchemy.orm import relationship
+ from ..database import Base
++from datetime import datetime
++import enum
+
+
++# Many-to-many таблица для связи пользователей и ролей
++user_roles = Table(
++    'user_roles',
++    Base.metadata,
++    Column('user_id', Integer, ForeignKey('users.id'), primary_key=True),
++    Column('role_id', Integer, ForeignKey('roles.id'), primary_key=True)
++)
+
+
++class RoleEnum(str, enum.Enum):
++    """Перечисление ролей в системе"""
++    ADMIN = "admin"
++    LIBRARIAN = "librarian"
++    READER = "reader"
++    GUEST = "guest"
+
+
++class Permission(Base):
++    """Модель прав доступа"""
++    __tablename__ = "permissions"
+
++    id = Column(Integer, primary_key=True, index=True)
++    name = Column(String, unique=True, nullable=False)
++    description = Column(String)
++    resource = Column(String, nullable=False)  # books, readers, borrows, etc.
++    action = Column(String, nullable=False)  # create, read, update, delete
+
++    # Связь с ролями
++    roles = relationship("Role", secondary="role_permissions", back_populates="permissions")
+
+
++# Many-to-many таблица для связи ролей и прав
++role_permissions = Table(
++    'role_permissions',
++    Base.metadata,
++    Column('role_id', Integer, ForeignKey('roles.id'), primary_key=True),
++    Column('permission_id', Integer, ForeignKey('permissions.id'), primary_key=True)
++)
+
+
++class Role(Base):
++    """Модель ролей"""
++    __tablename__ = "roles"
+
++    id = Column(Integer, primary_key=True, index=True)
++    name = Column(SQLEnum(RoleEnum), unique=True, nullable=False)
++    description = Column(String)
++    is_active = Column(Boolean, default=True)
+
++    # Связи
++    users = relationship("User", secondary=user_roles, back_populates="roles")
++    permissions = relationship("Permission", secondary=role_permissions, back_populates="roles")
+
+
++class UserActivity(Base):
++    """Логирование действий пользователей"""
++    __tablename__ = "user_activities"
+
++    id = Column(Integer, primary_key=True, index=True)
++    user_id = Column(Integer, ForeignKey('users.id'), nullable=False)
++    action = Column(String, nullable=False)
++    resource_type = Column(String)  # book, reader, borrow
++    resource_id = Column(Integer)
++    details = Column(String)
++    ip_address = Column(String)
++    timestamp = Column(DateTime, default=datetime.utcnow)
+
++    user = relationship("User", back_populates="activities")
+
+
+ class User(Base):
+     __tablename__ = "users"
+
+     id = Column(Integer, primary_key=True, index=True)
++    username = Column(String, unique=True, index=True, nullable=False)
+     email = Column(String, unique=True, index=True, nullable=False)
+-    hashed_password = Column(String(128), nullable=False)
++    hashed_password = Column(String, nullable=False)
+     is_active = Column(Boolean, default=True)
++    is_verified = Column(Boolean, default=False)
++    created_at = Column(DateTime, default=datetime.utcnow)
++    role = Column(String, default="reader")  # admin, librarian, reader
+
+-    # Relationship to track who created/managed records if needed
+-    # For now, we'll just have the basic user fields
+\ No newline at end of file
++    # Связи
++    borrows = relationship("Borrow", back_populates="user")
++    reader = relationship("Reader", back_populates="user", uselist=False, cascade="all, delete-orphan")
+
++    # Новые связи для ролей и уведомлений
++    roles = relationship("Role", secondary=user_roles, back_populates="users")
++    activities = relationship("UserActivity", back_populates="user")
++    notifications = relationship("Notification", back_populates="user")
++    notification_preferences = relationship("NotificationPreference", back_populates="user", uselist=False)
+\ No newline at end of file
